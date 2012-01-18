@@ -10729,10 +10729,15 @@ Ember.EventDispatcher = Ember.Object.extend(
     The root DOM element to which event listeners should be attached. Event
     listeners will be attached to the document unless this is overridden.
 
+    Can be specified as a DOMElement or a selector string.
+
+    The default body is a string since this may be evaluated before document.body
+    exists in the DOM.
+
     @type DOMElement
-    @default document
+    @default 'body'
   */
-  rootElement: document,
+  rootElement: 'body',
 
   /**
     @private
@@ -10782,6 +10787,8 @@ Ember.EventDispatcher = Ember.Object.extend(
     ember_assert('You cannot make a new Ember.Application using a root element that is an ancestor of an existing Ember.Application', !rootElement.find('.ember-application').length);
 
     rootElement.addClass('ember-application');
+
+    ember_assert('Unable to add "ember-application" class to rootElement. Make sure you the body or an element in the body.', rootElement.is('.ember-application'));
 
     for (event in events) {
       if (events.hasOwnProperty(event)) {
@@ -10863,17 +10870,9 @@ Ember.EventDispatcher = Ember.Object.extend(
 
   /** @private */
   _bubbleEvent: function(view, evt, eventName) {
-    var result = true, handler,
-        self = this;
-
-      Ember.run(function() {
-        handler = view[eventName];
-        if (Ember.typeOf(handler) === 'function') {
-          result = handler.call(view, evt);
-        }
-      });
-
-    return result;
+    return Ember.run(function() {
+      return view.handleEvent(eventName, evt);
+    });
   },
 
   /** @private */
@@ -10927,10 +10926,14 @@ Ember.Application = Ember.Namespace.extend(
 /** @scope Ember.Application.prototype */{
 
   /**
+    The root DOM element of the Application.
+
+    Can be specified as DOMElement or a selector string.
+
     @type DOMElement
-    @default document
+    @default 'body'
   */
-  rootElement: document,
+  rootElement: 'body',
 
   /**
     @type Ember.EventDispatcher
@@ -12288,6 +12291,19 @@ Ember.View = Ember.Object.extend(
         view.transitionTo(state);
       });
     }
+  },
+
+  // .......................................................
+  // EVENT HANDLING
+  //
+
+  /**
+    @private
+
+    Handle events from `Ember.EventDispatcher`
+  */
+  handleEvent: function(eventName, evt) {
+    return this.invokeForState('handleEvent', eventName, evt);
   }
 
 });
@@ -12411,6 +12427,11 @@ Ember.View.states = {
 
     getElement: function() {
       return null;
+    },
+
+    // Handle events from `Ember.EventDispatcher`
+    handleEvent: function() {
+      return true; // continue event propagation
     }
   }
 };
@@ -12607,6 +12628,16 @@ Ember.View.states.hasElement = {
 
     get(view, 'domManager').remove();
     return view;
+  },
+
+  // Handle events from `Ember.EventDispatcher`
+  handleEvent: function(view, eventName, evt) {
+    var handler = view[eventName];
+    if (Ember.typeOf(handler) === 'function') {
+      return handler.call(view, evt);
+    } else {
+      return true; // continue event propagation
+    }
   }
 };
 
@@ -14046,14 +14077,7 @@ Ember.TextSupport = Ember.Mixin.create(
   },
 
   _elementValueDidChange: function() {
-    var element = this.$();
-
-    if (element.length) {
-      set(this, 'value', this.$().val());
-    } else {
-      // the element is receiving blur because it was
-      // removed, so don't do anything.
-    }
+    set(this, 'value', this.$().val());
   }
 
 });
@@ -14125,14 +14149,6 @@ Ember.Button = Ember.View.extend(Ember.TargetActionSupport, {
     return this.get('tagName') === 'a' ? '#' : null;
   }).property('tagName').cacheable(),
 
-  click: function() {
-    // Actually invoke the button's target and action.
-    // This method comes from the Ember.TargetActionSupport mixin.
-    this.triggerAction();
-
-    return get(this, 'propagateEvents');
-  },
-
   mouseDown: function() {
     if (!get(this, 'disabled')) {
       set(this, 'isActive', true);
@@ -14158,12 +14174,29 @@ Ember.Button = Ember.View.extend(Ember.TargetActionSupport, {
 
   mouseUp: function(event) {
     if (get(this, 'isActive')) {
+      // Actually invoke the button's target and action.
+      // This method comes from the Ember.TargetActionSupport mixin.
+      this.triggerAction();
       set(this, 'isActive', false);
     }
 
     this._mouseDown = false;
     this._mouseEntered = false;
     return get(this, 'propagateEvents');
+  },
+
+  keyDown: function(event) {
+    // Handle space or enter
+    if (event.keyCode === 13 || event.keyCode === 32) {
+      this.mouseDown();
+    }
+  },
+
+  keyUp: function(event) {
+    // Handle space or enter
+    if (event.keyCode === 13 || event.keyCode === 32) {
+      this.mouseUp();
+    }
   },
 
   // TODO: Handle proper touch behavior.  Including should make inactive when
